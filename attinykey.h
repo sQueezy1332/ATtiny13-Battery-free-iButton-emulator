@@ -27,7 +27,7 @@
 #if defined(__AVR__)
 #include <util/crc16.h>
 #endif
-
+//MINIMUM WORKING F_CPU = 4.8MHZ
 #define NOINLINE __attribute__((noinline))
 // Constants, types and definitions
 #define timeslot_divider (1000000.0 / (F_CPU / 64))        // Period timer clock cycles im microseconds
