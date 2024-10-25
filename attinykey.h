@@ -97,7 +97,7 @@ void calibration() {
 	pulse(480); pulse(410); pulse(70); pulse(65); pulse(55); pulse(53); pulse(10); pulse(5); pulse(3); delay10ms(100);
 }
 
-NOINLINE void Emulate(const byte buf[], byte keyType, byte emulRetry = REPEAT);
+NOINLINE void Emulate(byte emulRetry = REPEAT);
 // Power down sleep mode
 NOINLINE void powerDown();
 // OneWire functions (based on this project: http://www.technoblogy.com/show?2G8A)
