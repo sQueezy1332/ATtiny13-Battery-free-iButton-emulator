@@ -27,7 +27,7 @@
 #if defined(__AVR__)
 #include <util/crc16.h>
 #endif
-//MINIMUM WORKING F_CPU = 4.8MHZ
+
 #define NOINLINE __attribute__((noinline))
 // Constants, types and definitions
 #define timeslot_divider (1000000.0 / (F_CPU / 64))        // Period timer clock cycles im microseconds
@@ -118,27 +118,26 @@ byte masterReadByte();
 // Reset timer counter and flags
 void resetTimer();
 // Wait for high level in Slave mode
-/*NOINLINE */void waitTimeSlot();
+NOINLINE void waitTimeSlot();
+bool error_get() { return TIFR0; } // 140*timeslot_divider //
+
+bool error_high() { return TIFR0 & _BV(TOV0);/*_BV(OCF0A);*/ } //overflow timer0 256*timeslot_divider //
 // Read OneWire pin
-bool pinRead() { return PINREG & _BV(ONEWIRE_PIN);}
+bool pinRead() { return PINREG & _BV(ONEWIRE_PIN); }
 // Wait for high level in Slave mode
-void waitForHigh() { while (!pinRead()) { /*line low*/ }; IFREG = _BV(INTF0); }				// Reset INT0 Interrupt Flag
+void waitForHigh() { while (!pinRead()) { if (error_get()) return; }; IFREG = _BV(INTF0); }				// Reset INT0 Interrupt Flag
+
 // Wait for high level in Slave mode
-void waitForLow() { while (!(IFREG & _BV(INTF0))) {/*line high*/ } };           // Detect falling edge
+void waitForLow() { while (!(IFREG & _BV(INTF0))) { if (error_high()) return; } TIFR0 = 0xFF; };						// Detect falling edge
 
-bool getError() { return TIFR0 & _BV(TOV0); } //overflow timer0 256*timeslot_divider //
+NOINLINE void waitReset();
 
-void waitReset();
-
-void recvAndProcessCmd();
 // Write bit in Slave mode
 NOINLINE void slaveWriteBit(bool bit);
 // Read bit in Slave mode
 NOINLINE bool slaveReadBit();
-
 // Calculate CRC over the buffer - 0x00 is correct
-byte CRC8(const byte buf[], byte len = 7);
-
+NOINLINE byte CRC8(const byte buf[], byte len = 7);
 // EEPROM functions
 // Write byte to EEPROM
 NOINLINE void memWrite(byte ucAddress, byte ucData);
