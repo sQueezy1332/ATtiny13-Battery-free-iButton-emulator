@@ -24,9 +24,13 @@
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
 */
+
 #if defined(__AVR__)
 #include <util/crc16.h>
 #endif
+//#define __AVR_TINY__
+//#include <setjmp.h>
+//jmp_buf env;
 
 #define NOINLINE __attribute__((noinline))
 // Constants, types and definitions
@@ -61,7 +65,7 @@
 #endif // __AVR_ATmega328P__
 
 
-static byte dataBytes[8];
+static byte dataBytes[8]{0x1};
 static byte repeats_init = 0;
 //static byte error = 0;
 
@@ -119,19 +123,18 @@ byte masterReadByte();
 void resetTimer();
 // Wait for high level in Slave mode
 NOINLINE void waitTimeSlot();
-bool error_get() { return TIFR0; } // 140*timeslot_divider //
 
-bool error_high() { return TIFR0 & _BV(TOV0);/*_BV(OCF0A);*/ } //overflow timer0 256*timeslot_divider //
+bool error_get() { return TIFR0; } // 120 * timeslot_divider //
+
+bool error_high() {  return TIFR0 & _BV(TOV0);/*_BV(OCF0A);*/ } //overflow timer0 256 * timeslot_divider // 3413.2 ms if F_CPU 4.8mhz
 // Read OneWire pin
 bool pinRead() { return PINREG & _BV(ONEWIRE_PIN); }
 // Wait for high level in Slave mode
-void waitForHigh() { while (!pinRead()) { if (error_get()) return; }; IFREG = _BV(INTF0); }				// Reset INT0 Interrupt Flag
-
+void waitForHigh();				// Reset INT0 Interrupt Flag
 // Wait for high level in Slave mode
-void waitForLow() { while (!(IFREG & _BV(INTF0))) { if (error_high()) return; } TIFR0 = 0xFF; };						// Detect falling edge
+void waitForLow();						// Detect falling edge
 
 NOINLINE void waitReset();
-
 // Write bit in Slave mode
 NOINLINE void slaveWriteBit(bool bit);
 // Read bit in Slave mode
