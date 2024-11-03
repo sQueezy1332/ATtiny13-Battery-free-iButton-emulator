@@ -3,11 +3,13 @@
  Created:	16-Feb-24 03:14:21
  Author:	sQueezy
 */
+
 #include "attinykey.h"
 
 void loop() {
 	static byte rom_addr = 0xFF;
-	byte repeats = repeats_init, data, i, bitmask;  // Address of the current key ROM
+	byte repeats = repeats_init;
+	byte data, i, bitmask;  // Address of the current key ROM
 	//sei();                          // Enable interrupts  
 	//DDRB = _BV(BATTERY_PIN) | _BV(LED_PIN);   //now led, battery output (0)	// Invert pull-ups (1 for inputs, 0 for outputs - as far as I could measure, this configuration consumes the least energy)
 	//DDRB |= _BV(BUTTON_PIN);					// Set battery pin as output (gnd)				// configure button pin as output (gnd)
@@ -21,40 +23,41 @@ WaitForResetPulse:
 	//pinLowRelease(90);
 	DDRB |= _BV(ONEWIRE_PIN); //Send Presence pulse
 	//resetTimer();
-	if (rom_addr > EEPROM_SIZE) {
-		dataBytes[0] = 0x1;
-	}
-	else {
-		for (i = 0; i < 7; i++) dataBytes[i] = memRead(rom_addr + i);			// Get the current ROM bit //137 ticks * (1/4.8Mhz) ~ 28.5 mcs
+	if (rom_addr < EEPROM_SIZE) {
+		for (i = 0; i < 7; i++) dataBytes[i] = memRead(rom_addr + i); // Get the current ROM bit //137 ticks * (1/4.8Mhz) ~ 28.5 mcs}
 	}
 	dataBytes[7] = CRC8(dataBytes);		//~387 ticks * (1/4.8Mhz) ~ 80.6 mcs
 	//while (!(TIFR0 & _BV(OCF0B))) {};
 	DDRB &= ~(_BV(ONEWIRE_PIN)); // END Presence Configure OneWire pin as INPUT
 	//TCNT0 = OCR0A = 120 / timeslot_divider; //Skip first timeslot check (now we have 2048 /*(1706.66)*/microseconds until the next timeout)
 	for (bitmask = 1, data = 0; bitmask; bitmask <<= 1) {
+		waitTimeSlot(); if (error_get()) return;
 		if (slaveReadBit()) data |= bitmask;
-		if (error_get()) goto WaitForResetPulse;
 	}
 	if (data == SEARCH_CMD /*|| data == ALARM_CMD*/) {
 		bool bit_send, bit_recv;
 		for (i = 0; i < 8; i++) {
 			for (bitmask = 1; bitmask; bitmask <<= 1) {
 				bit_send = dataBytes[i] & bitmask;
-				slaveWriteBit(bit_send); if (error_high()) return;//goto Loop;	// Write the bit into the bus and check timeslot error
-				slaveWriteBit(!bit_send); if (error_high()) return;		// Write the inverted bit into the bus and check timeslot error
-				bit_recv = slaveReadBit(); if (error_high()) return;
+				waitTimeSlot(); if (error_get()) return; 
+				slaveWriteBit(bit_send); 	
+				waitTimeSlot(); if (error_get()) return; 
+				slaveWriteBit(!bit_send); 	
+				waitTimeSlot(); if (error_get()) return; 
+				bit_recv = slaveReadBit(); 
 				if (bit_send != bit_recv) goto WaitForResetPulse;	// Check if the master has chosen another slave
 			}
 		}
 	}
-	else if (data & 0b11 ) { // Answer with the current iButton ROM
+	else if (data & 0b10/*READ_CMD || data == 0xF*/ ) { // Answer with the current iButton ROM
 		for (i = 0; i < 8; i++) {
 			for (bitmask = 1; bitmask; bitmask <<= 1) {
+				waitTimeSlot(); if (error_get()) return;
 				slaveWriteBit(dataBytes[i] & bitmask);
-				if (error_get()) goto WaitForResetPulse;//goto Loop; // Check timeslot error
 			}
 		}
 	}
+	else goto WaitForResetPulse;
 	if (repeats) { --repeats; goto WaitForResetPulse; }
 	if ((rom_addr >= (EEPROM_SIZE - 1 - 7)) /*|| (memRead(rom_addr) == 0xFF)*/) { 
 		//if (rom_addr == 0xFF) {
@@ -121,13 +124,13 @@ void waitReset() {
 		WDTREG = _BV(WDCE);
 		WDTREG = _BV(WDTIE);			//16ms
 		__asm__ __volatile__("sleep");
-		/*
-		if (MCUSR & _BV(WDRF)) {							// Check if just powered on
-			MCUSR = 0;
-			Emulate();
-			return false;
-		}
-		*/
+		
+		//if (MCUSR & _BV(WDRF)) {							// Check if just powered on
+		//	MCUSR = 0;
+		//	Emulate();
+		//	return; //
+		//}
+		
 		//MCUSR = 0; //WDRF
 		INTREG = 0;						// Disable INT0 interrupts
 		MCUCR = _BV(ISC01);				// INT0 falling edge detection mode
@@ -211,27 +214,34 @@ void masterWriteBit(bool bit) {
 }
 
 // Wait for high level in Slave mode
+void waitForHigh() { 
+	while (!pinRead()) { if (error_get()) return; }; 
+	IFREG = _BV(INTF0); // Reset INT0 Interrupt Flag
+}
+
+// Wait for low level in Slave mode
+void waitForLow() { 
+	while (!(IFREG & _BV(INTF0))) { if (error_high()) return; } 
+	TIFR0 = 0xFF;  // Reset timer flags
+};
+
+// Wait for high level in Slave mode
 void waitTimeSlot() {
 	resetTimer();
 	waitForHigh();
 	if (error_get()) return;
 	resetTimer();
 	waitForLow();
-	if (error_high()) return;
 }
 
 // Read bit in Slave mode
 bool slaveReadBit() {
-	waitTimeSlot();
-	if (error_get()) return false;
-	delayUs(15);
+	delayUs(20);
 	return pinRead();					// Merge bit whith timeslot check result
 }
 
 // Write bit in Slave mode
 void slaveWriteBit(bool bit) {
-	waitTimeSlot();
-	if (error_get()) return;
 	if (bit == false) {
 		pinLowRelease(20);
 	}
