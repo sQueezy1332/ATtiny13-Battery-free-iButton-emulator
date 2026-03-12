@@ -31,7 +31,7 @@
 //#define __AVR_TINY__
 //#include <setjmp.h>
 //jmp_buf env;
-
+__AVR_ATtiny13__
 #define NOINLINE __attribute__((noinline))
 // Constants, types and definitions
 #define timeslot_divider (1000000.0 / (F_CPU / 64))        // Period timer clock cycles im microseconds
@@ -65,12 +65,12 @@
 #endif // __AVR_ATmega328P__
 
 
-static byte dataBytes[8]{0x1};
+static byte dataBytes[8] { 0x1,0xBE, 0x40, 0x11, 0x5A, 0x36, 0x0, 0xE1 }; // { }; //8 byte smaller programm size, only if array is empty
 static byte repeats_init = 0;
 //static byte error = 0;
 
 
-////* Interrupts*/
+/* Interrupts*/
 EMPTY_INTERRUPT(INT0_vect);                     // We can save two more bytes if we use assembler and the iret command, but I haven't found an easy way to do this.
 ISR(WDT_vect, ISR_ALIASOF(INT0_vect));
 ISR(PCINT0_vect, ISR_ALIASOF(INT0_vect));
@@ -92,14 +92,6 @@ void delayUs(uint16_t microseconds);
 // Delay for N x 10 mill sec
 NOINLINE void delay10ms(byte ms) { while (ms--) delayUs(10000); }
 
-// Pulse generation for oscillator calibration
-void pulse(uint16_t duration);
-
-void calibration() {
-	//masterMode = true;
-	//PORTB = PORTB & ~_BV(MASTER_PIN);              // Remove pull-up from iButton pin
-	pulse(480); pulse(410); pulse(70); pulse(65); pulse(55); pulse(53); pulse(10); pulse(5); pulse(3); delay10ms(100);
-}
 
 NOINLINE void Emulate(byte emulRetry = REPEAT);
 // Power down sleep mode
@@ -149,3 +141,13 @@ NOINLINE byte memRead(byte ucAddress);
 // Other functions
 // Blink N times
 NOINLINE void blink(byte count);
+
+// Pulse generation for oscillator calibration
+void pulse(uint16_t duration);
+
+void calibration() {
+	//masterMode = true;
+	//PORTB = PORTB & ~_BV(MASTER_PIN);              // Remove pull-up from iButton pin
+	pulse(480); pulse(410); pulse(70); pulse(65); pulse(55); pulse(53); pulse(10); pulse(5); pulse(3); delay10ms(100);
+}
+
