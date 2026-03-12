@@ -7,110 +7,105 @@
 #include "attinykey.h"
 
 void loop() {
-	static byte rom_addr = 0xFF;
+	static byte rom_addr = 0xFF; //first key is static in rom
 	byte repeats = repeats_init;
-	byte data, i, bitmask;  // Address of the current key ROM
-	//sei();                          // Enable interrupts  
-	//DDRB = _BV(BATTERY_PIN) | _BV(LED_PIN);   //now led, battery output (0)	// Invert pull-ups (1 for inputs, 0 for outputs - as far as I could measure, this configuration consumes the least energy)
+	byte data, bitmask; 
+	//DDRB = _BV(BATTERY_PIN) | _BV(LED_PIN);   //now led, battery output (0)	
+	// Invert pull-ups (1 for inputs, 0 for outputs - as far as I could measure, this configuration consumes the least energy)
 	//DDRB |= _BV(BUTTON_PIN);					// Set battery pin as output (gnd)				// configure button pin as output (gnd)
 	//PORTB = ~DDRB;	
 	powerDown();	// Sleep and accumulate energy
 	//DDRB |= _BV(ONEWIRE_PIN); MCUCR = _BV(SE) | _BV(SM1);  while (true){__asm__ __volatile__("sleep");} 
-WaitForResetPulse:
-	//if(!waitReset()) return;
+wait_for_reset:
 	waitReset();
 	delayUs(20);
 	//pinLowRelease(90);
 	DDRB |= _BV(ONEWIRE_PIN); //Send Presence pulse
 	//resetTimer();
-	if (rom_addr < EEPROM_SIZE) {
-		for (i = 0; i < 7; i++) dataBytes[i] = memRead(rom_addr + i); // Get the current ROM bit //137 ticks * (1/4.8Mhz) ~ 28.5 mcs}
+	if (rom_addr < EEPROM_SIZE - 1) {
+		for (int i = 0; i < 7; i++) dataBytes[i] = memRead(rom_addr + i); // Get the current ROM bit //137 ticks * (1/4.8Mhz) ~ 28.5 mcs}
 	}
 	dataBytes[7] = CRC8(dataBytes);		//~387 ticks * (1/4.8Mhz) ~ 80.6 mcs
 	//while (!(TIFR0 & _BV(OCF0B))) {};
-	DDRB &= ~(_BV(ONEWIRE_PIN)); // END Presence Configure OneWire pin as INPUT
+	DDRB &= ~_BV(ONEWIRE_PIN); // END Presence Configure OneWire pin as INPUT
 	//TCNT0 = OCR0A = 120 / timeslot_divider; //Skip first timeslot check (now we have 2048 /*(1706.66)*/microseconds until the next timeout)
 	for (bitmask = 1, data = 0; bitmask; bitmask <<= 1) {
 		waitTimeSlot(); if (error_get()) return;
 		if (slaveReadBit()) data |= bitmask;
 	}
 	if (data == SEARCH_CMD /*|| data == ALARM_CMD*/) {
-		bool bit_send, bit_recv;
-		for (i = 0; i < 8; i++) {
+		for (int i = 0; i < 8; i++) {
 			for (bitmask = 1; bitmask; bitmask <<= 1) {
-				bit_send = dataBytes[i] & bitmask;
-				waitTimeSlot(); if (error_get()) return; 
-				slaveWriteBit(bit_send); 	
-				waitTimeSlot(); if (error_get()) return; 
-				slaveWriteBit(!bit_send); 	
-				waitTimeSlot(); if (error_get()) return; 
-				bit_recv = slaveReadBit(); 
-				if (bit_send != bit_recv) goto WaitForResetPulse;	// Check if the master has chosen another slave
+				data = dataBytes[i] & bitmask;
+					waitTimeSlot(); if (error_get()) return; 
+				slaveWriteBit(data);
+					waitTimeSlot(); if (error_get()) return; 
+				slaveWriteBit(!data);
+					waitTimeSlot(); if (error_get()) return; 
+				if (slaveReadBit() != data) goto wait_for_reset;	// Check if the master has chosen another slave
 			}
 		}
 	}
-	else if (data & 0b10/*READ_CMD || data == 0xF*/ ) { // Answer with the current iButton ROM
-		for (i = 0; i < 8; i++) {
+	else if (data & 0b11/*READ_CMD || data == 0xF*/ ) { // Answer with the current iButton ROM //CHANGED
+		for (int i = 0; i < 8; i++) {
 			for (bitmask = 1; bitmask; bitmask <<= 1) {
+				data = dataBytes[i] & bitmask;
 				waitTimeSlot(); if (error_get()) return;
-				slaveWriteBit(dataBytes[i] & bitmask);
+				slaveWriteBit(data);
 			}
 		}
 	}
-	else goto WaitForResetPulse;
-	if (repeats) { --repeats; goto WaitForResetPulse; }
-	if ((rom_addr >= (EEPROM_SIZE - 1 - 7)) /*|| (memRead(rom_addr) == 0xFF)*/) { 
+	else goto wait_for_reset;
+	if (repeats) { --repeats; goto wait_for_reset; }
+	if ((rom_addr >= EEPROM_SIZE - 1 - 7) /*|| (memRead(rom_addr) == 0xFF)*/) {
 		//if (rom_addr == 0xFF) {
 		//	for (i = 1; i < 7; i++)  dataBytes[i] = 0xFF;
 		//	--rom_addr;
 		//}
 		//else 
-			rom_addr = 0;
-		return;
+		rom_addr = 0;
 	} 
-	rom_addr += 7;// Switch to the next saved ROM
+	else rom_addr += 7;  // Switch to the next saved ROM
 }
 
 int main() {
-#ifndef __LGT8FX8P__
+//#ifndef __LGT8FX8P__
 	TCCR0B = 0b011; //prescaler(clk / 64) = 150khz // prescaler(clk / 64) = 125khz  
-#else
-	TCCR0B = 0b100 /*| _BV(CS00)*/; //prescaler(clk / 256) = 125khz
-#endif // !__LGT8FX8P__
+//#else
+	//TCCR0B = 0b100 /*| _BV(CS00)*/; //prescaler(clk / 256) = 125khz
+//#endif // !__LGT8FX8P__
 	PRR = 0xFF;                     // Disable timer and ADC
 	ACSR = _BV(ACD);                // Disable Analog Comparator
 	PORTB = _BV(BUTTON_PIN);		// Pull up only button pin
-	if (PINB & _BV(BATTERY_PIN)) {              // Check if the emulator powered by battery
+	if (PINB & _BV(BATTERY_PIN)) {  // Check if the emulator powered by battery
 		master_mode();
 	}
 	if (PINB & _BV(BUTTON_PIN)) repeats_init = REPEAT - 1; // The number of repeats for one key
-	PORTB = 0;	//Disable pullup
+	PORTB = 0;						//Disable pullup
 	DDRB = (_BV(LED_PIN) | _BV(BUTTON_PIN) | _BV(BATTERY_PIN));
 	sei();
 	powerDown();						// First sleep after powering on to stabilize the processes //USING (SUT 0b10) FUSE BITS FOR 64MS DELAY STARTUP
 	//OSCCAL = 60;						// 0-127 Oscillator Frequency calibration value: set the frequency to ~8 MHz (should be calibrated manually)
-	for (;;) {
-		loop();
-	}
+	for (;;) { loop(); }
 }
 
 // Power down sleep mode
 void powerDown() {
-	DIDR0 = 0xFF;											// Disabling digital input circuits.
-	__asm__ __volatile__("wdr");												// Reset Watchdog timer
-	WDTREG = _BV(WDCE);
-	//if ((MCUSR & _BV(PORF))) {							// Check if just powered on 
+	DIDR0 = 0xFF;								// Disabling digital input circuits.
+	__asm__ __volatile__("wdr");				// Reset Watchdog timer
+	WDTREG = _BV(WDCE);							// Watchdog change enable
+	//if ((MCUSR & _BV(PORF))) {				// Check if just powered on 
 	//	MCUSR = 0;
 	//}
 	//else {
-		//      WDTCR = _BV(WDTIE) | _BV(WDP2);				// Sleep for 0.25s before processing the next key ROM
-#ifndef __LGT8FX8P__
-	WDTREG = _BV(WDTIE) | 0b101 /* 0b110*/;				// Sleep for 0.5s before processing the next key ROM //0b110 (1 sec)
-#else
-	WDTREG = _BV(WDTIE) | 0b011 /*| 0b110*/;
-#endif // __LGT8FX8P__
+	//      WDTCR = _BV(WDTIE) | _BV(WDP2);		// Sleep for 0.25s before processing the next key ROM
+//#ifndef __LGT8FX8P__
+	WDTREG = _BV(WDTIE) | 0b101 /* 0b110*/;		// Sleep for 0.5s (0b101) before processing the next key ROM // 1 sec (0b110)
+//#else
+	//WDTREG = _BV(WDTIE) | 0b011 /*| 0b110*/;
+//#endif // __LGT8FX8P__
 	//}
-	MCUCR = _BV(SE) | _BV(SM1);                             // Sleep Enable, power-down mode.
+	MCUCR = _BV(SE) | _BV(SM1);					// Sleep Enable, power-down mode.
 	__asm__ __volatile__("sleep");
 	DIDR0 = 0;
 }
@@ -134,14 +129,15 @@ void waitReset() {
 		//MCUSR = 0; //WDRF
 		INTREG = 0;						// Disable INT0 interrupts
 		MCUCR = _BV(ISC01);				// INT0 falling edge detection mode
-		PRR = ~_BV(PRTIM0);				// Enable Timer			
+		PRR = ~_BV(PRTIM0);				// Shutdown adc and other perif except timer	
 		// Setup timer to control timeslots. To check whether the pulse fits into the timeslot, it is necessary that channel B triggers, but channel A does not trigger.
-		OCR0A = 720 / timeslot_divider; // 960us is the maximum pulse duration, 240 is the minimum.
-		OCR0B = 360 / timeslot_divider; // We would also need to subtract the ~22 clock cycles that are spent on waking up from sleep, but the one clock cycle of the timer is equal to 64 clock cycles of the CPU, so we will not do this unless absolutely necessary.  
+		OCR0A = 720 / timeslot_divider; // 960us is the maximum pulse duration, 240 is the minimum.// shouldn't trigger
+		OCR0B = 360 / timeslot_divider; // We would also need to subtract the ~22 clock cycles that are spent on waking up from sleep, 
+		//but the one clock cycle of the timer is equal to 64 clock cycles of the CPU, so we will not do this unless absolutely necessary.  
 		resetTimer();					// Reset timer counter and flags
 		while (!pinRead()) { /*line low*/ };					// Wait for the end of the Reset pulse
-	} //while (!(TIFR0 & _BV(OCF0B)) || (TIFR0 & _BV(OCF0A)));// Check timeslot error
-	while (TIFR0 != _BV(OCF0B));
+	} while (!(TIFR0 & _BV(OCF0B)) || (TIFR0 & _BV(OCF0A)));// Check timeslot error
+	//while (!(TIFR0 & _BV(OCF0B)));
 	//OCR0A = 1013 / (timeslot_divider);
 	OCR0B = 120 / (timeslot_divider);
 	//return true;
@@ -204,34 +200,19 @@ byte masterReadByte() {
 // Write bit in Master mode
 void masterWriteBit(bool bit) {
 	byte low, high;
-	if (bit) {
-		low = 5; high = 60;
-	}
-	else {
-		low = 50; high = 15;
-	}
+	if (bit) {low = 5; high = 60;}
+	else {low = 50; high = 15;}
 	pinLowRelease(low, high);
 }
 
 // Wait for high level in Slave mode
-void waitForHigh() { 
-	while (!pinRead()) { if (error_get()) return; }; 
-	IFREG = _BV(INTF0); // Reset INT0 Interrupt Flag
-}
-
-// Wait for low level in Slave mode
-void waitForLow() { 
-	while (!(IFREG & _BV(INTF0))) { if (error_high()) return; } 
-	TIFR0 = 0xFF;  // Reset timer flags
-};
-
-// Wait for high level in Slave mode
 void waitTimeSlot() {
 	resetTimer();
-	waitForHigh();
-	if (error_get()) return;
+	while (!pinRead()) { if (error_get()) return; };
+	IFREG = _BV(INTF0); // Reset INT0 Interrupt Flag
 	resetTimer();
-	waitForLow();
+	while (!(IFREG & _BV(INTF0))) { if (error_high()) return; } 
+	TIFR0 = 0xFF;  // Reset timer flags
 }
 
 // Read bit in Slave mode
@@ -242,23 +223,20 @@ bool slaveReadBit() {
 
 // Write bit in Slave mode
 void slaveWriteBit(bool bit) {
-	if (bit == false) {
-		pinLowRelease(20);
-	}
+	if (bit == false) { pinLowRelease(20); }
 }
 
 // Write byte to EEPROM
 void memWrite(byte ucAddress, byte ucData) {
 	while (EECR & _BV(EEPE)) {};		// Wait for completion of previous write
 	//byte store = memRead(1020);
-	//if (store != ucData) {
-	//	if ((store | (ucData ^ 0xFF)) == 0xFF) EECR = _BV(EEPM1);
+	//if (store == ucData) return;
+	//	if ((store | (ucData ^ 0xFF)) == 0xFF) EECR = _BV(EEPM1); //write only mode
 	//	else EECR = 0;
 	EEAR = ucAddress;				// Set up address and bit registers
 	EEDR = ucData;
 	EECR |= _BV(EEMPE);				// Master bit program enable
-	EECR |= _BV(EEPE);              // Program enable 
-//}
+	EECR |= _BV(EEPE);              // Start writing 
 }
 
 // Read byte from EEPROM
@@ -279,10 +257,9 @@ byte CRC8(const byte buf[], byte len) {
 // Blink N times
 void blink(byte count) {
 	while (count--) {
-		PORTB &= ~_BV(LED_PIN);        // Turn LED off
-		//delay()
-		delay10ms(50);                 // 0.5s
 		PORTB |= _BV(LED_PIN);         // Turn LED on
+		delay10ms(50);                 // 0.5s
+		PORTB &= ~_BV(LED_PIN);        // Turn LED off
 		delay10ms(50);                 // 0.5s
 	}
 }
@@ -321,23 +298,22 @@ void master_mode() {
 	}
 	for (addr = 0;;) {
 		//delay10ms(100);
-		if (oneWireReset()) {                      // Reset OneWire
-			masterWriteByte(READ_CMD);          // Read iButton ROM
+		if (oneWireReset()) {								// Reset OneWire
+			masterWriteByte(READ_CMD);						// Read iButton ROM
 			masterReadData(dataBytes);
-			if (dataBytes[7] == (CRC8(dataBytes))) {// Check ROM CRC
-				if (find_key(addr, dataBytes)) blink(2);		// ROM was found or EEPROM is full
-				else {
-					blink(1);									// If the ROM is not found and we have not reached the EEPROM limits
-					for (i = 0; i < 8; i++) {
-						memWrite(addr + i, dataBytes[i]);		// Save new ROM to the list
-					}
-				}
+			if (dataBytes[7] == (CRC8(dataBytes))) {		// Check ROM CRC
+				if (!find_key(addr, dataBytes)) {			// If the ROM is not found and we have not reached the EEPROM limits	
+					blink(1);
+					for (i = 0; i < 8; i++) { 
+						memWrite(addr + i, dataBytes[i]);	// Save new ROM to the list
+					}										
+				} else { blink(2); }						// ROM was found or EEPROM is full
 			}//else blink(3);								// ROM CRC Error	
 		}
 	}
 }
 
-void writeBitMetakom(bool bit, const byte& Ti, const byte& Tj) {
+void writeBitMetakom(bool bit, const byte Ti, const byte Tj) {
 	DDRB &= ~(_BV(ONEWIRE_PIN));		// End high current consumption
 	delayUs(bit ? Ti : Tj);
 	DDRB |= _BV(ONEWIRE_PIN);		// Start high current consumption
@@ -350,7 +326,7 @@ void Emulate(byte emulRetry) {
 	byte bitmask, i;
 	while (emulRetry--) {
 		if (nibble == 0xFF) {
-		METAKOM:
+		//METAKOM:
 			DDRB |= _BV(ONEWIRE_PIN);
 			delayUs(((0xFF & 1) ? Tshort : Tlong) + (Tlong + Tshort));			//sending synchronise bit log 0
 			for (bitmask = 0b100; bitmask; bitmask >>= 1) {
@@ -364,7 +340,7 @@ void Emulate(byte emulRetry) {
 			DDRB &= ~_BV(ONEWIRE_PIN);
 		}
 		else {
-		CYFRAL: //0xEE
+		//CYFRAL: //0xEE
 			for (bitmask = 0b1000; bitmask; bitmask >>= 1) {
 				0x1 & bitmask ? pinLowRelease(Tshort, Tlong) : pinLowRelease(Tlong, Tshort); //sending start nibble
 			}
