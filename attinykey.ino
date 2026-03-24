@@ -36,7 +36,7 @@ wait_for_reset:
 	if (data == SEARCH_CMD /*|| data == ALARM_CMD*/) {
 		for (int i = 0; i < 8; i++) {
 			for (bitmask = 1; bitmask; bitmask <<= 1) {
-				data = dataBytes[i] & bitmask;
+				data = !!(dataBytes[i] & bitmask);
 					waitTimeSlot(); if (error_get()) return; 
 				slaveWriteBit(data);
 					waitTimeSlot(); if (error_get()) return; 
@@ -222,8 +222,8 @@ bool slaveReadBit() {
 }
 
 // Write bit in Slave mode
-void slaveWriteBit(bool bit) {
-	if (bit == false) { pinLowRelease(20); }
+void slaveWriteBit(byte bit) {
+	if (!bit) { pinLowRelease(20); }
 }
 
 // Write byte to EEPROM
@@ -353,5 +353,3 @@ void Emulate(byte emulRetry) {
 	}
 	nibble ^= 0x11;
 }
-
-// END-OF-FILE
