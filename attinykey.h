@@ -128,7 +128,7 @@ void waitForLow();						// Detect falling edge
 
 NOINLINE void waitReset();
 // Write bit in Slave mode
-NOINLINE void slaveWriteBit(bool bit);
+NOINLINE void slaveWriteBit(byte bit);
 // Read bit in Slave mode
 NOINLINE bool slaveReadBit();
 // Calculate CRC over the buffer - 0x00 is correct
